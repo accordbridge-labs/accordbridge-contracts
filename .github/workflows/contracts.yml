@@ -1,0 +1,63 @@
+name: Contract WASM build and tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.0"
+          targets: wasm32v1-none
+          components: rustfmt
+      - name: Check Rust toolchain and lockfile
+        run: |
+          rustc --version
+          rustup target list --installed | grep -Fx wasm32v1-none
+          test -f Cargo.lock
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run locked unit and integration tests
+        run: cargo test --locked --workspace
+      - name: Build pinned release WASM
+        run: cargo build --locked --release --target wasm32v1-none --workspace
+      - name: Record first build hashes
+        run: |
+          mkdir -p artifact
+          cp target/wasm32v1-none/release/accordbridge_escrow.wasm artifact/
+          cp target/wasm32v1-none/release/accordbridge_test_token.wasm artifact/
+          (cd artifact && sha256sum accordbridge_escrow.wasm accordbridge_test_token.wasm > SHA256SUMS)
+      - name: Verify fresh release rebuild matches
+        run: |
+          cargo clean --release --target wasm32v1-none
+          cargo build --locked --release --target wasm32v1-none --workspace
+          cmp artifact/accordbridge_escrow.wasm target/wasm32v1-none/release/accordbridge_escrow.wasm
+          cmp artifact/accordbridge_test_token.wasm target/wasm32v1-none/release/accordbridge_test_token.wasm
+          (cd artifact && sha256sum -c SHA256SUMS)
+      - name: Attach source/build metadata
+        run: |
+          printf 'source_commit=%s\nrust=1.91.0\ntarget=wasm32v1-none\nprofile=release\nsoroban_sdk=27.0.6\n' "$GITHUB_SHA" > artifact/BUILD-INFO.txt
+          sha256sum Cargo.lock rust-toolchain.toml escrow/src/lib.rs test-token/src/lib.rs >> artifact/BUILD-INFO.txt
+      - name: Upload unsigned reproducible WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: accordbridge-testnet-wasm-${{ github.sha }}
+          path: |
+            artifact/accordbridge_escrow.wasm
+            artifact/accordbridge_test_token.wasm
+            artifact/SHA256SUMS
+            artifact/BUILD-INFO.txt
+          if-no-files-found: error
+          retention-days: 30
