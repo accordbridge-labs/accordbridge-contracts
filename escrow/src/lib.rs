@@ -218,6 +218,94 @@ mod tests {
         assert_eq!(escrow.state().status, 0);
     }
     #[test]
+    fn outsider_cannot_accept_and_duplicate_refund_vote_does_not_settle() {
+        let (env, client, freelancer, token, address, terms) = setup();
+        env.mock_all_auths();
+        let escrow = EscrowClient::new(&env, &address);
+        let outsider = Address::generate(&env);
+        assert!(escrow.try_accept(&outsider, &terms).is_err());
+        assert!(!escrow.state().client_accepted);
+        assert!(!escrow.state().freelancer_accepted);
+        token::StellarAssetClient::new(&env, &token).mint(&client, &1500000000);
+        escrow.accept(&client, &terms);
+        escrow.accept(&freelancer, &terms);
+        escrow.fund();
+        let frozen = escrow.state();
+        assert!(escrow.try_accept(&client, &terms).is_err());
+        assert_eq!(escrow.state(), frozen);
+        escrow.request_refund(&freelancer);
+        escrow.request_refund(&freelancer);
+        assert_eq!(escrow.state().status, 1);
+        assert_eq!(
+            token::Client::new(&env, &token).balance(&address),
+            1500000000
+        );
+        // A single vote deliberately does not revoke the client's release right.
+        escrow.release();
+        assert_eq!(
+            token::Client::new(&env, &token).balance(&freelancer),
+            1500000000
+        );
+        assert_eq!(token::Client::new(&env, &token).balance(&address), 0);
+        assert!(escrow.try_request_refund(&client).is_err());
+        assert!(escrow.try_fund().is_err());
+    }
+    #[test]
+    fn funded_escrow_rejects_missing_authorization_without_changing_balances() {
+        let (env, client, freelancer, token, address, terms) = setup();
+        env.mock_all_auths();
+        token::StellarAssetClient::new(&env, &token).mint(&client, &1500000000);
+        let escrow = EscrowClient::new(&env, &address);
+        escrow.accept(&client, &terms);
+        escrow.accept(&freelancer, &terms);
+        escrow.fund();
+        let funded = escrow.state();
+        env.mock_auths(&[]);
+        assert!(escrow.try_release().is_err());
+        assert!(escrow.try_request_refund(&client).is_err());
+        assert!(escrow.try_request_refund(&freelancer).is_err());
+        assert_eq!(escrow.state(), funded);
+        assert_eq!(
+            token::Client::new(&env, &token).balance(&address),
+            1500000000
+        );
+        assert_eq!(token::Client::new(&env, &token).balance(&client), 0);
+        assert_eq!(token::Client::new(&env, &token).balance(&freelancer), 0);
+    }
+    #[test]
+    fn refund_is_terminal_in_either_vote_order() {
+        for client_first in [true, false] {
+            let (env, client, freelancer, token, address, terms) = setup();
+            env.mock_all_auths();
+            token::StellarAssetClient::new(&env, &token).mint(&client, &1500000000);
+            let escrow = EscrowClient::new(&env, &address);
+            escrow.accept(&client, &terms);
+            escrow.accept(&freelancer, &terms);
+            escrow.fund();
+            let (first, second) = if client_first {
+                (&client, &freelancer)
+            } else {
+                (&freelancer, &client)
+            };
+            escrow.request_refund(first);
+            escrow.request_refund(second);
+            let refunded = escrow.state();
+            assert_eq!(refunded.status, 3);
+            assert!(escrow.try_request_refund(first).is_err());
+            assert!(escrow.try_request_refund(second).is_err());
+            assert!(escrow.try_release().is_err());
+            assert!(escrow.try_fund().is_err());
+            assert!(escrow.try_accept(&client, &terms).is_err());
+            assert_eq!(escrow.state(), refunded);
+            assert_eq!(
+                token::Client::new(&env, &token).balance(&client),
+                1500000000
+            );
+            assert_eq!(token::Client::new(&env, &token).balance(&freelancer), 0);
+            assert_eq!(token::Client::new(&env, &token).balance(&address), 0);
+        }
+    }
+    #[test]
     #[should_panic(expected = "testnet only")]
     fn refuses_other_networks() {
         let env = Env::default();
