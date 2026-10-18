@@ -34,6 +34,6 @@ The workspace integration resides in the sibling backend/frontend. The backend c
 - [Funding/release evidence](deployments/smoke-testnet.json)
 - [Canonical product rules](https://github.com/accordbridge-labs/accordbridge-backend/blob/main/docs/PRODUCT.md)
 
-No upstream contract implementation was copied. License selection and production dependency decisions remain pending.
+No upstream contract implementation was copied. Licensed under the [MIT License](LICENSE). Dependencies retain their own licenses and notices. Production dependency decisions remain pending.
 
 The escrow tests also exercise unauthorized calls after funding, outsider acceptance, repeated refund votes, both refund vote orders, terminal-state replay, and balance conservation. These are local Soroban host tests, not an audit or new deployment evidence.
