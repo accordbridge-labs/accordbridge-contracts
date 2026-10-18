@@ -1,5 +1,9 @@
 # AccordBridge Contracts
 
+[![Contract checks](https://github.com/accordbridge-labs/accordbridge-contracts/actions/workflows/contracts.yml/badge.svg?branch=main)](https://github.com/accordbridge-labs/accordbridge-contracts/actions/workflows/contracts.yml)
+
+[Contract behavior](#what-it-does) · [Authorization reference](docs/CONTRACT-INTERFACE.md) · [Local checks](#build-and-test) · [Testnet scripts](#testnet-deployment-and-smoke-test) · [Contribute](https://github.com/accordbridge-labs/.github/blob/main/docs/START-HERE.md)
+
 **Status: experimental Stellar testnet implementation.** Rust/Soroban escrow and a valueless ABUSD faucet token are deployed and exercised on testnet. No audit, mainnet deployment or real-money integration exists. The production escrow provider remains undecided.
 
 ## What it does
@@ -16,6 +20,18 @@ Pinned versions: Rust 1.91.0, soroban-sdk 27.0.6, JavaScript stellar-sdk 17.2.1;
 rustup show
 cargo test --locked
 cargo build --locked --release --target wasm32v1-none
+```
+
+These checks do not deploy contracts or submit transactions. CI also checks
+formatting and verifies that a fresh release rebuild produces matching WASM hashes.
+See [CI and downloadable artifacts](docs/CI-WASM-ARTIFACTS.md).
+
+### Testnet deployment and smoke test
+
+The following commands create keys and broadcast transactions. Run only when you
+intend to create Testnet fixtures, not as a prerequisite for a documentation change.
+
+```sh
 npm ci
 npm run testnet:setup
 npm run testnet:smoke
@@ -26,6 +42,8 @@ Setup obtains free test XLM from Friendbot, uploads both WASMs and deploys the t
 The workspace integration resides in the sibling backend/frontend. The backend copies public deployment values into its configuration and verifies code/terms/balance on reconciliation. It supports the first milestone only; testnet transaction evidence is in its `docs/evidence/testnet-api.json`.
 
 ## Documents
+
+- [Contract interface, authorization and settlement states](docs/CONTRACT-INTERFACE.md)
 
 - [Testnet decision and limits](docs/TESTNET-DECISION.md)
 - [Provider evaluation](docs/PROVIDER-EVALUATION.md)
