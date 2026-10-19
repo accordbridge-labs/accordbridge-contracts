@@ -4,7 +4,15 @@
   "license": "MIT",
   "private": true,
   "type": "module",
-  "engines": {"node": ">=22.12"},
-  "scripts": {"testnet:setup": "node scripts/testnet.mjs setup", "testnet:smoke": "node scripts/testnet.mjs smoke"},
-  "dependencies": {"@stellar/stellar-sdk": "17.2.1"}
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "testnet:setup": "node scripts/testnet.mjs setup",
+    "testnet:smoke": "node scripts/testnet.mjs smoke",
+    "test": "node --test scripts/*.test.mjs"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "17.2.1"
+  }
 }
