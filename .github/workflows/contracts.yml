@@ -9,6 +9,21 @@ permissions:
   contents: read
 
 jobs:
+  fixture-tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Offline fixture tooling tests (no setup or smoke broadcasts)
+        run: npm test
+
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

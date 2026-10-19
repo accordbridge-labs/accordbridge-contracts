@@ -1,77 +1,102 @@
-import * as S from '@stellar/stellar-sdk';
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import * as S from "@stellar/stellar-sdk";
 
-const RPC = 'https://soroban-testnet.stellar.org';
-const server = new S.rpc.Server(RPC);
-const network = await server.getNetwork();
-if (network.passphrase !== S.Networks.TESTNET) throw new Error('Testnet required');
-mkdirSync('.local',{recursive:true,mode:0o700});
-mkdirSync('deployments',{recursive:true});
-const path = '.local/testnet-fixtures.json';
-if(!existsSync(path)) writeFileSync(path,JSON.stringify(Object.fromEntries(['deployer','client','freelancer','outsider'].map(name=>[name,S.Keypair.random().secret()]))),{mode:0o600,flag:'wx'});
-const keys = Object.fromEntries(Object.entries(JSON.parse(readFileSync(path,'utf8'))).map(([name,secret])=>[name,S.Keypair.fromSecret(secret)]));
-async function ensureAccount(key) {
-  try { await server.getAccount(key.publicKey()); } catch {
-    const result = await fetch(`https://friendbot.stellar.org?addr=${key.publicKey()}`);
-    if(!result.ok) throw new Error(`Friendbot failed: ${result.status}`);
+export const RPC = "https://soroban-testnet.stellar.org";
+export const USAGE =
+  "Usage: node scripts/testnet.mjs <setup|smoke>\n       node scripts/testnet.mjs --help\nsetup requires built escrow/token WASM; smoke requires a valid deployments/testnet.json. Testnet only.";
+
+export function prerequisites(mode, read = readFileSync) {
+  if (mode === "setup") {
+    const inputs = {};
+    for (const [name, file] of Object.entries({
+      escrowWasm: "target/wasm32v1-none/release/accordbridge_escrow.wasm",
+      tokenWasm: "target/wasm32v1-none/release/accordbridge_test_token.wasm",
+    })) {
+      try {
+        inputs[name] = read(file);
+      } catch {
+        throw new Error(
+          `Missing or unreadable WASM input: ${file}. Build the workspace first.`,
+        );
+      }
+      if (
+        inputs[name].length < 8 ||
+        !inputs[name]
+          .subarray(0, 8)
+          .equals(Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]))
+      )
+        throw new Error(
+          `Invalid WASM input: ${file}. Build the workspace first.`,
+        );
+    }
+    return inputs;
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(read("deployments/testnet.json", "utf8"));
+  } catch {
+    throw new Error(
+      "Missing or invalid deployments/testnet.json; inspect the public setup manifest.",
+    );
+  }
+  if (
+    !manifest ||
+    manifest.network !== "testnet" ||
+    manifest.networkPassphrase !== S.Networks.TESTNET ||
+    manifest.rpc !== RPC ||
+    !/^[a-f0-9]{64}$/.test(manifest.escrowWasmHash) ||
+    !/^[a-f0-9]{64}$/.test(manifest.tokenWasmHash) ||
+    !S.StrKey.isValidContract(manifest.tokenContract ?? "") ||
+    manifest.tokenSymbol !== "ABUSD" ||
+    manifest.tokenDecimals !== 7 ||
+    manifest.tokenHasMonetaryValue !== false
+  )
+    throw new Error(
+      "Invalid Testnet manifest identity, WASM hashes or valueless ABUSD configuration.",
+    );
+  return { manifest };
+}
+
+export async function runCli(
+  args,
+  {
+    read = readFileSync,
+    loadRunner = () => import("./testnet-run.mjs"),
+    log = console.log,
+  } = {},
+) {
+  if (args.length === 1 && args[0] === "--help") {
+    log(USAGE);
+    return;
+  }
+  if (args.length !== 1 || !["setup", "smoke"].includes(args[0]))
+    throw new Error(USAGE);
+  const mode = args[0];
+  const inputs = prerequisites(mode, read);
+  const { runTestnet } = await loadRunner();
+  await runTestnet(mode, inputs);
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  try {
+    await runCli(process.argv.slice(2));
+  } catch (error) {
+    // Only our validation/account messages are safe to print. SDK errors can contain envelopes.
+    const safe =
+      error instanceof Error &&
+      (error.message === USAGE ||
+        /^(Missing or (unreadable WASM input|invalid deployments\/testnet.json)|Invalid (WASM input|Testnet manifest)|Testnet required|Account lookup |Friendbot )/.test(
+          error.message,
+        ));
+    console.error(
+      safe
+        ? error.message
+        : "Testnet command failed. Inspect public chain state before retrying; no automatic retry was attempted.",
+    );
+    process.exitCode = 1;
   }
 }
-export async function send(key,operation) {
-  const source=await server.getAccount(key.publicKey());
-  const raw=new S.TransactionBuilder(source,{fee:S.BASE_FEE,networkPassphrase:S.Networks.TESTNET}).addOperation(operation).setTimeout(120).build();
-  const tx=await server.prepareTransaction(raw); tx.sign(key);
-  const submission=await server.sendTransaction(tx);
-  if(submission.status==='ERROR') throw new Error('Testnet transaction rejected');
-  const hash=Buffer.from(tx.hash()).toString('hex');
-  console.log(`Submitted ${hash}`);
-  for(let i=0;i<45;i++) {
-    const result=await server.getTransaction(hash);
-    if(result.status==='SUCCESS') return result;
-    if(result.status==='FAILED') throw Object.assign(new Error(`Testnet transaction failed: ${hash}`), {ledgerFailed: true, hash});
-    await new Promise(resolve=>setTimeout(resolve,2000));
-  }
-  throw new Error(`Transaction still unknown; inspect before retrying: ${hash}`);
-}
-const addr=value=>S.Address.fromString(value).toScVal();
-const invoke=(id,method,...args)=>new S.Contract(id).call(method,...args);
-async function state(id,source=keys.client.publicKey()) {
-  const tx=new S.TransactionBuilder(await server.getAccount(source),{fee:S.BASE_FEE,networkPassphrase:S.Networks.TESTNET}).addOperation(invoke(id,'state')).setTimeout(60).build();
-  const result=await server.simulateTransaction(tx);
-  if(!S.rpc.Api.isSimulationSuccess(result)) throw new Error('State query failed');
-  return S.scValToNative(result.result.retval);
-}
-if(process.argv[2]==='setup') {
-  await ensureAccount(keys.deployer);
-  const escrowWasm=readFileSync('target/wasm32v1-none/release/accordbridge_escrow.wasm');
-  const tokenWasm=readFileSync('target/wasm32v1-none/release/accordbridge_test_token.wasm');
-  const escrowHash=createHash('sha256').update(escrowWasm).digest('hex');
-  const tokenHash=createHash('sha256').update(tokenWasm).digest('hex');
-  const escrowUpload=await send(keys.deployer,S.Operation.uploadContractWasm({wasm:escrowWasm}));
-  const tokenUpload=await send(keys.deployer,S.Operation.uploadContractWasm({wasm:tokenWasm}));
-  const deployed=await send(keys.deployer,S.Operation.createCustomContract({address:S.Address.fromString(keys.deployer.publicKey()),wasmHash:Buffer.from(tokenHash,'hex'),salt:randomBytes(32),constructorArgs:[]}));
-  const tokenContract=S.scValToNative(deployed.returnValue);
-  const manifest={network:'testnet',networkPassphrase:S.Networks.TESTNET,rpc:RPC,escrowWasmHash:escrowHash,tokenWasmHash:tokenHash,tokenContract,tokenSymbol:'ABUSD',tokenDecimals:7,tokenHasMonetaryValue:false,uploadedAt:new Date().toISOString(),transactions:{escrowUpload:escrowUpload.txHash,tokenUpload:tokenUpload.txHash,tokenDeployment:deployed.txHash}};
-  writeFileSync('deployments/testnet.json',JSON.stringify(manifest,null,2)+'\n');
-  console.log('Public testnet manifest written. Private fixture keys remain in ignored .local/.');
-} else if(process.argv[2]==='smoke') {
-  const manifest=JSON.parse(readFileSync('deployments/testnet.json','utf8'));
-  for(const name of ['client','freelancer','outsider']) await ensureAccount(keys[name]);
-  const terms=randomBytes(32);
-  const deployed=await send(keys.client,S.Operation.createCustomContract({address:S.Address.fromString(keys.client.publicKey()),wasmHash:Buffer.from(manifest.escrowWasmHash,'hex'),salt:randomBytes(32),constructorArgs:[addr(keys.client.publicKey()),addr(keys.freelancer.publicKey()),addr(manifest.tokenContract),S.nativeToScVal(1500000000n,{type:'i128'}),S.nativeToScVal(terms)]}));
-  const escrow=S.scValToNative(deployed.returnValue);
-  const hashes={deployment:deployed.txHash};
-  hashes.faucet=(await send(keys.client,invoke(manifest.tokenContract,'faucet',addr(keys.client.publicKey())))).txHash;
-  hashes.clientAcceptance=(await send(keys.client,invoke(escrow,'accept',addr(keys.client.publicKey()),S.nativeToScVal(terms)))).txHash;
-  hashes.freelancerAcceptance=(await send(keys.freelancer,invoke(escrow,'accept',addr(keys.freelancer.publicKey()),S.nativeToScVal(terms)))).txHash;
-  hashes.funding=(await send(keys.client,invoke(escrow,'fund'))).txHash;
-  if((await state(escrow)).status!==1) throw new Error('Funding did not reconcile');
-  // An outsider's source-account signature does not satisfy the client's authorization.
-  let rejected=false;
-  try { await send(keys.outsider,invoke(escrow,'release')); } catch (error) { if (!error.ledgerFailed) throw error; rejected=true; hashes.unauthorizedRelease=error.hash; }
-  if(!rejected || (await state(escrow)).status!==1) throw new Error('Unauthorized release was not blocked');
-  hashes.release=(await send(keys.client,invoke(escrow,'release'))).txHash;
-  if((await state(escrow)).status!==2) throw new Error('Release did not reconcile');
-  writeFileSync('deployments/smoke-testnet.json',JSON.stringify({network:'testnet',escrow,escrowWasmHash:manifest.escrowWasmHash,tokenContract:manifest.tokenContract,client:keys.client.publicKey(),freelancer:keys.freelancer.publicKey(),termsHash:terms.toString('hex'),amountBaseUnits:'1500000000',unauthorizedReleaseRejected:true,finalStatus:'released',transactions:hashes,checkedAt:new Date().toISOString()},null,2)+'\n');
-  console.log('Testnet funding and release verified; public evidence recorded.');
-} else { throw new Error('Use setup or smoke'); }
