@@ -96,6 +96,70 @@ mod tests {
         assert_eq!(token.balance(&bob), 1_500_000_000);
     }
 
+    fn fixture() -> (Env, Address, Address, Address) {
+        let env = Env::default();
+        env.ledger().with_mut(|ledger| {
+            ledger.network_id = [
+                206, 224, 48, 45, 89, 132, 77, 50, 189, 202, 145, 92, 130, 3, 221, 68, 179, 63,
+                187, 126, 220, 25, 5, 30, 163, 122, 190, 223, 40, 236, 212, 114,
+            ];
+        });
+        let id = env.register(TestToken, ());
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        (env, id, alice, bob)
+    }
+
+    #[test]
+    fn faucet_overflow_preserves_balance_at_the_boundary() {
+        let (env, id, alice, _) = fixture();
+        let token = TestTokenClient::new(&env, &id);
+        env.as_contract(&id, || put(&env, &alice, i128::MAX - 10_000_000_000));
+        token.faucet(&alice);
+        assert_eq!(token.balance(&alice), i128::MAX);
+        assert!(token.try_faucet(&alice).is_err());
+        assert_eq!(token.balance(&alice), i128::MAX);
+    }
+
+    #[test]
+    fn destination_overflow_rolls_back_sender_debit() {
+        let (env, id, alice, bob) = fixture();
+        let token = TestTokenClient::new(&env, &id);
+        env.as_contract(&id, || {
+            put(&env, &alice, 2);
+            put(&env, &bob, i128::MAX - 1);
+        });
+        env.mock_all_auths();
+        assert!(token.try_transfer(&alice, &bob, &2).is_err());
+        assert_eq!(token.balance(&alice), 2);
+        assert_eq!(token.balance(&bob), i128::MAX - 1);
+        token.transfer(&alice, &bob, &1);
+        assert_eq!(token.balance(&alice), 1);
+        assert_eq!(token.balance(&bob), i128::MAX);
+        assert!(token.try_transfer(&alice, &bob, &1).is_err());
+        assert_eq!(token.balance(&alice), 1);
+        assert_eq!(token.balance(&bob), i128::MAX);
+    }
+
+    #[test]
+    fn zero_and_self_transfers_require_auth_and_never_mint() {
+        let (env, id, alice, bob) = fixture();
+        let token = TestTokenClient::new(&env, &id);
+        env.as_contract(&id, || put(&env, &alice, i128::MAX));
+        assert!(token.try_transfer(&alice, &bob, &0).is_err());
+        assert!(token.try_transfer(&alice, &alice, &0).is_err());
+        assert!(token.try_transfer(&alice, &alice, &i128::MAX).is_err());
+        env.mock_all_auths();
+        token.transfer(&alice, &bob, &0);
+        token.transfer(&alice, &alice, &0);
+        token.transfer(&alice, &alice, &i128::MAX);
+        token.transfer(&bob, &bob, &0);
+        assert!(token.try_transfer(&bob, &bob, &1).is_err());
+        assert!(token.try_transfer(&alice, &alice, &-1).is_err());
+        assert_eq!(token.balance(&alice), i128::MAX);
+        assert_eq!(token.balance(&bob), 0);
+    }
+
     #[test]
     #[should_panic(expected = "testnet only")]
     fn rejects_other_networks() {
