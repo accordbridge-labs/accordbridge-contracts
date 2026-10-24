@@ -1,24 +1,40 @@
+import { beginEvidence } from "./run-evidence.mjs";
 import * as S from "@stellar/stellar-sdk";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { ensureAccount, configureTimeout } from "./testnet-account.mjs";
 
-export async function runTestnet(
-  mode,
-  inputs,
-  {
-    createServer = (url) => new S.rpc.Server(url),
-    fs = { mkdirSync, existsSync, readFileSync, writeFileSync },
-  } = {},
-) {
-  const { mkdirSync, existsSync, readFileSync, writeFileSync } = fs;
-
-  const RPC = "https://soroban-testnet.stellar.org";
-  const server = createServer(RPC);
+export async function runTestnet(mode, inputs, options = {}) {
+  const server = (options.createServer ?? ((url) => new S.rpc.Server(url)))(
+    "https://soroban-testnet.stellar.org",
+  );
   configureTimeout(server);
   const network = await server.getNetwork();
   if (network.passphrase !== S.Networks.TESTNET)
     throw new Error("Testnet required");
+  const evidence = (options.beginEvidence ?? beginEvidence)(mode);
+  try {
+    const manifest = await executeTestnet(mode, inputs, { ...options, server });
+    evidence.complete(manifest);
+    console.log("Public run evidence and latest manifest recorded.");
+  } catch (error) {
+    try {
+      evidence.fail();
+    } catch {
+      /* Keep the original failure; started record remains. */
+    }
+    throw error;
+  }
+}
+
+async function executeTestnet(
+  mode,
+  inputs,
+  { server, fs = { mkdirSync, existsSync, readFileSync, writeFileSync } } = {},
+) {
+  const { mkdirSync, existsSync, readFileSync, writeFileSync } = fs;
+
+  const RPC = "https://soroban-testnet.stellar.org";
   mkdirSync(".local", { recursive: true, mode: 0o700 });
   mkdirSync("deployments", { recursive: true });
   const path = ".local/testnet-fixtures.json";
@@ -126,13 +142,11 @@ export async function runTestnet(
         tokenDeployment: deployed.txHash,
       },
     };
-    writeFileSync(
-      "deployments/testnet.json",
-      JSON.stringify(manifest, null, 2) + "\n",
-    );
+
     console.log(
-      "Public testnet manifest written. Private fixture keys remain in ignored .local/.",
+      "Testnet setup confirmed. Private fixture keys remain in ignored .local/.",
     );
+    return manifest;
   } else if (mode === "smoke") {
     const { manifest } = inputs;
     for (const name of ["client", "freelancer", "outsider"])
@@ -202,30 +216,21 @@ export async function runTestnet(
     ).txHash;
     if ((await state(escrow)).status !== 2)
       throw new Error("Release did not reconcile");
-    writeFileSync(
-      "deployments/smoke-testnet.json",
-      JSON.stringify(
-        {
-          network: "testnet",
-          escrow,
-          escrowWasmHash: manifest.escrowWasmHash,
-          tokenContract: manifest.tokenContract,
-          client: keys.client.publicKey(),
-          freelancer: keys.freelancer.publicKey(),
-          termsHash: terms.toString("hex"),
-          amountBaseUnits: "1500000000",
-          unauthorizedReleaseRejected: true,
-          finalStatus: "released",
-          transactions: hashes,
-          checkedAt: new Date().toISOString(),
-        },
-        null,
-        2,
-      ) + "\n",
-    );
-    console.log(
-      "Testnet funding and release verified; public evidence recorded.",
-    );
+    return {
+      network: "testnet",
+      escrow,
+      escrowWasmHash: manifest.escrowWasmHash,
+      tokenWasmHash: manifest.tokenWasmHash,
+      tokenContract: manifest.tokenContract,
+      client: keys.client.publicKey(),
+      freelancer: keys.freelancer.publicKey(),
+      termsHash: terms.toString("hex"),
+      amountBaseUnits: "1500000000",
+      unauthorizedReleaseRejected: true,
+      finalStatus: "released",
+      transactions: hashes,
+      checkedAt: new Date().toISOString(),
+    };
   } else {
     throw new Error("Use setup or smoke");
   }
