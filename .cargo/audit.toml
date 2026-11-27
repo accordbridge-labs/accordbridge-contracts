@@ -1,0 +1,12 @@
+# Reviewed advisory exceptions for the testnet-only contract workspace.
+# See docs/DEPENDENCY-ADVISORIES.md for scope, triage and expiry rules.
+[advisories]
+ignore = [
+    # Timing variability in crypto-bigint 0.5.5, reached through the pinned
+    # soroban-sdk 27.0.6 host dependency. The fix requires crypto-bigint
+    # >= 0.7.6, which is not available in the pinned SDK line. This crate is
+    # used by the local/test host, not by the pinned on-chain WASM; the
+    # deployed experiment holds valueless ABUSD and no real keys.
+    # Exception expires 2026-12-27: re-evaluate on the next soroban-sdk bump.
+    "RUSTSEC-2026-0387",
+]

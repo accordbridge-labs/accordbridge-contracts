@@ -1,6 +1,7 @@
 # AccordBridge Contracts
 
 [![Contract checks](https://github.com/accordbridge-labs/accordbridge-contracts/actions/workflows/contracts.yml/badge.svg?branch=main)](https://github.com/accordbridge-labs/accordbridge-contracts/actions/workflows/contracts.yml)
+[![Dependency advisories](https://github.com/accordbridge-labs/accordbridge-contracts/actions/workflows/dependency-advisories.yml/badge.svg?branch=main)](https://github.com/accordbridge-labs/accordbridge-contracts/actions/workflows/dependency-advisories.yml)
 
 [Contract behavior](#what-it-does) · [Authorization reference](docs/CONTRACT-INTERFACE.md) · [Local checks](#build-and-test) · [Testnet scripts](#testnet-deployment-and-smoke-test) · [Contribute](https://github.com/accordbridge-labs/.github/blob/main/docs/START-HERE.md)
 
@@ -48,6 +49,7 @@ The workspace integration resides in the sibling backend/frontend. The backend c
 - [Testnet decision and limits](docs/TESTNET-DECISION.md)
 - [Provider evaluation](docs/PROVIDER-EVALUATION.md)
 - [Validation matrix](docs/VALIDATION.md)
+- [Dependency advisories, Rust exception and triage](docs/DEPENDENCY-ADVISORIES.md)
 - [Public deployment](deployments/testnet.json)
 - [Funding/release evidence](deployments/smoke-testnet.json)
 - [Canonical product rules](https://github.com/accordbridge-labs/accordbridge-backend/blob/main/docs/PRODUCT.md)
