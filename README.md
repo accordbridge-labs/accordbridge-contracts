@@ -47,6 +47,7 @@ The workspace integration resides in the sibling backend/frontend. The backend c
 - [Contract interface, authorization and settlement states](docs/CONTRACT-INTERFACE.md)
 
 - [Testnet decision and limits](docs/TESTNET-DECISION.md)
+- [Production escrow roadmap — future work, not a current capability](docs/PRODUCTION-ESCROW-ROADMAP.md)
 - [Provider evaluation](docs/PROVIDER-EVALUATION.md)
 - [Validation matrix](docs/VALIDATION.md)
 - [Dependency advisories, Rust exception and triage](docs/DEPENDENCY-ADVISORIES.md)
